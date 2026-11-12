@@ -552,6 +552,58 @@
   // Chart.js instance, created lazily and reused across renders.
   var chart = null;
 
+  /* --- Optional challenges: sort, spending limit, dark mode -------------
+     Preferences live in Local Storage through their own keys so a corrupt
+     or missing preference can never break the transaction data. */
+
+  var PREF_SORT_KEY = "expenseViz.sortMode";
+  var PREF_LIMIT_KEY = "expenseViz.limitCents";
+  var PREF_THEME_KEY = "expenseViz.theme";
+
+  var SORT_MODES = ["newest", "amount-desc", "amount-asc", "category"];
+
+  // Display-only sort; the state array keeps insertion order.
+  var sortMode = "newest";
+
+  // 0 means "no limit set", so nothing is highlighted.
+  var limitCents = 0;
+
+  /**
+   * Reads a preference value, tolerating unavailable storage.
+   *
+   * @param {string} key - Storage key.
+   * @returns {string|null}
+   */
+  function readPref(key) {
+    try {
+      if (typeof localStorage === "undefined") {
+        return null;
+      }
+      return localStorage.getItem(key);
+    } catch (e) {
+      return null;
+    }
+  }
+
+  /**
+   * Writes a preference value, tolerating unavailable storage.
+   *
+   * @param {string} key - Storage key.
+   * @param {*} value - Value to store.
+   * @returns {boolean} True when the write succeeded.
+   */
+  function writePref(key, value) {
+    try {
+      if (typeof localStorage === "undefined") {
+        return false;
+      }
+      localStorage.setItem(key, String(value));
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
   // Per-field error element ids (Requirement 1.3).
   var FIELD_ERROR_IDS = {
     itemName: "item-name-error",
@@ -572,14 +624,41 @@
     return document.getElementById(id);
   }
 
+  // Cached Intl formatter; created once because constructing it is the
+  // expensive part (Requirement 7.3 asks views to update in <100ms).
+  var idrFormatter = null;
+
   /**
-   * Formats integer cents as a string with exactly 2 decimal places.
+   * Formats integer cents as an Indonesian Rupiah string with exactly two
+   * decimal places, e.g. 250000 cents -> "Rp 2.500,00".
+   *
+   * Two decimals are kept deliberately: the balance requirement asks for a
+   * 2-decimal display even though everyday rupiah amounts rarely use them.
    *
    * @param {number} cents - Amount in integer cents.
    * @returns {string} Formatted amount.
    */
   function formatCents(cents) {
-    return (cents / 100).toFixed(2);
+    var amount = cents / 100;
+    try {
+      if (
+        typeof Intl !== "undefined" &&
+        typeof Intl.NumberFormat === "function"
+      ) {
+        if (idrFormatter === null) {
+          idrFormatter = new Intl.NumberFormat("id-ID", {
+            style: "currency",
+            currency: "IDR",
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2,
+          });
+        }
+        return idrFormatter.format(amount);
+      }
+    } catch (e) {
+      // Fall through to the manual format below.
+    }
+    return "Rp " + amount.toFixed(2);
   }
 
   /**
@@ -663,9 +742,15 @@
       emptyEl.hidden = true;
     }
 
+    var rows = getSortedTransactions();
     var fragment = document.createDocumentFragment();
-    for (var i = 0; i < transactions.length; i++) {
-      fragment.appendChild(buildTransactionRow(transactions[i]));
+    for (var i = 0; i < rows.length; i++) {
+      var row = buildTransactionRow(rows[i]);
+      // Optional challenge: flag spending above the configured limit.
+      if (limitCents > 0 && rows[i].amountCents > limitCents) {
+        row.className = "over-limit";
+      }
+      fragment.appendChild(row);
     }
     listEl.appendChild(fragment);
   }
@@ -731,6 +816,16 @@
           legend: {
             position: "bottom",
             labels: { boxWidth: 14, font: { size: 14 } },
+          },
+          // Tooltips must show rupiah too, not the raw major-unit number.
+          tooltip: {
+            callbacks: {
+              label: function (context) {
+                var value = context && context.parsed ? context.parsed : 0;
+                var label = context && context.label ? context.label : "";
+                return label + ": " + formatCents(Math.round(value * 100));
+              },
+            },
           },
         },
       },
@@ -865,12 +960,157 @@
   }
 
   /**
+   * Returns the transactions in display order without mutating the state
+   * array (optional challenge: sorting).
+   *
+   * @returns {Array<object>} Sorted copy of the transactions array.
+   */
+  function getSortedTransactions() {
+    var list = transactions.slice();
+
+    if (sortMode === "amount-desc") {
+      list.sort(function (a, b) {
+        return b.amountCents - a.amountCents;
+      });
+    } else if (sortMode === "amount-asc") {
+      list.sort(function (a, b) {
+        return a.amountCents - b.amountCents;
+      });
+    } else if (sortMode === "category") {
+      list.sort(function (a, b) {
+        if (a.category === b.category) {
+          return a.itemName.localeCompare(b.itemName);
+        }
+        return a.category.localeCompare(b.category);
+      });
+    } else {
+      // "newest": most recently added first.
+      list.reverse();
+    }
+
+    return list;
+  }
+
+  /**
+   * Applies a theme and keeps the toggle button label in sync.
+   *
+   * @param {string} theme - "dark" or "light".
+   */
+  function applyTheme(theme) {
+    if (typeof document === "undefined" || !document.documentElement) {
+      return;
+    }
+
+    var isDark = theme === "dark";
+    var root = document.documentElement;
+
+    if (isDark) {
+      root.classList.add("dark");
+    } else {
+      root.classList.remove("dark");
+    }
+
+    var button = byId("theme-toggle");
+    if (button) {
+      button.textContent = isDark ? "Light mode" : "Dark mode";
+      button.setAttribute("aria-pressed", isDark ? "true" : "false");
+    }
+  }
+
+  /**
+   * Resolves the initial theme: stored preference first, then the OS/browser
+   * colour-scheme preference, then light.
+   *
+   * @returns {string} "dark" or "light".
+   */
+  function resolveInitialTheme() {
+    var stored = readPref(PREF_THEME_KEY);
+    if (stored === "dark" || stored === "light") {
+      return stored;
+    }
+    try {
+      if (
+        typeof window !== "undefined" &&
+        window.matchMedia &&
+        window.matchMedia("(prefers-color-scheme: dark)").matches
+      ) {
+        return "dark";
+      }
+    } catch (e) {
+      // Ignore and fall back to light.
+    }
+    return "light";
+  }
+
+  /**
+   * Toggles between dark and light mode and persists the choice.
+   *
+   * @returns {string} The theme now applied.
+   */
+  function toggleTheme() {
+    var isDark =
+      typeof document !== "undefined" &&
+      document.documentElement &&
+      document.documentElement.classList.contains("dark");
+    var next = isDark ? "light" : "dark";
+    applyTheme(next);
+    writePref(PREF_THEME_KEY, next);
+    return next;
+  }
+
+  /**
+   * Handles a change of the sort control.
+   *
+   * @param {Event} event - Change event from the sort select.
+   * @returns {string} The sort mode now applied.
+   */
+  function handleSortChange(event) {
+    var value = event && event.target ? event.target.value : "newest";
+    sortMode = SORT_MODES.indexOf(value) >= 0 ? value : "newest";
+    writePref(PREF_SORT_KEY, sortMode);
+    renderTransactionList();
+    return sortMode;
+  }
+
+  /**
+   * Handles input on the spending-limit field and re-renders the list so
+   * over-limit rows are highlighted immediately.
+   *
+   * A blank or zero value clears the highlight.
+   *
+   * @param {Event} event - Input event from the limit field.
+   * @returns {number} The limit in integer cents.
+   */
+  function handleLimitInput(event) {
+    var raw = event && event.target ? String(event.target.value).trim() : "";
+    var parsed = raw === "" ? NaN : Number(raw);
+
+    limitCents =
+      Number.isFinite(parsed) && parsed > 0 ? Math.round(parsed * 100) : 0;
+
+    writePref(PREF_LIMIT_KEY, limitCents);
+    renderTransactionList();
+    return limitCents;
+  }
+
+  /**
    * Restores state from Local Storage, wires the event listeners, and
    * renders the initial views (Requirements 5.2, 5.4, 6.1).
    *
    * @returns {object} The public ExpenseViz API.
    */
   function init() {
+    // Restore preferences before the first render so the initial paint
+    // already reflects the saved sort order, limit, and theme.
+    var storedSort = readPref(PREF_SORT_KEY);
+    sortMode = SORT_MODES.indexOf(storedSort) >= 0 ? storedSort : "newest";
+
+    var storedLimit = readPref(PREF_LIMIT_KEY);
+    var parsedLimit = storedLimit === null ? NaN : parseInt(storedLimit, 10);
+    limitCents = Number.isFinite(parsedLimit) && parsedLimit > 0 ? parsedLimit : 0;
+
+    applyTheme(resolveInitialTheme());
+
     var restored = load();
     transactions = restored === null ? [] : restored;
 
@@ -904,6 +1144,23 @@
       });
     }
 
+    var sortSelect = byId("sort-select");
+    if (sortSelect && typeof sortSelect.addEventListener === "function") {
+      sortSelect.value = sortMode;
+      sortSelect.addEventListener("change", handleSortChange);
+    }
+
+    var limitInput = byId("limit-input");
+    if (limitInput && typeof limitInput.addEventListener === "function") {
+      limitInput.value = limitCents > 0 ? (limitCents / 100).toFixed(2) : "";
+      limitInput.addEventListener("input", handleLimitInput);
+    }
+
+    var themeToggle = byId("theme-toggle");
+    if (themeToggle && typeof themeToggle.addEventListener === "function") {
+      themeToggle.addEventListener("click", toggleTheme);
+    }
+
     if (!isStorageAvailable()) {
       showStorageError(
         "Local storage is unavailable in this browser. Transactions will be kept only until this page is closed."
@@ -929,6 +1186,9 @@
     renderAll: renderAll,
     handleFormSubmit: handleFormSubmit,
     handleDeleteClick: handleDeleteClick,
+    handleSortChange: handleSortChange,
+    handleLimitInput: handleLimitInput,
+    toggleTheme: toggleTheme,
     init: init,
   };
 

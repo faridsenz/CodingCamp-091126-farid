@@ -10,8 +10,11 @@
   <main>
     <!-- 1. Total Balance -->
     <section id="total-balance-section" aria-labelledby="total-balance-label">
-      <h1 id="total-balance-label">Total Balance</h1>
-      <p id="total-balance">0.00</p>
+      <div class="balance-header">
+        <h1 id="total-balance-label">Total Balance</h1>
+        <button id="theme-toggle" type="button" class="ghost-btn" aria-pressed="false">Dark mode</button>
+      </div>
+      <p id="total-balance">Rp 0,00</p>
     </section>
 
     <!-- 2. Input Form -->
@@ -45,6 +48,21 @@
     <!-- 3. Transaction List -->
     <section id="transaction-list-section" aria-labelledby="transaction-list-label">
       <h2 id="transaction-list-label">Transaction List</h2>
+      <div class="list-controls">
+        <div class="control-field">
+          <label for="sort-select">Sort by</label>
+          <select id="sort-select">
+            <option value="newest">Newest first</option>
+            <option value="amount-desc">Amount: high to low</option>
+            <option value="amount-asc">Amount: low to high</option>
+            <option value="category">Category (A-Z)</option>
+          </select>
+        </div>
+        <div class="control-field">
+          <label for="limit-input">Highlight over (Rp)</label>
+          <input type="number" id="limit-input" step="0.01" min="0" inputmode="decimal" placeholder="e.g. 50000" autocomplete="off">
+        </div>
+      </div>
       <div id="transaction-list" class="scrollable-container">
         <p id="empty-state" class="empty-state">No transactions have been recorded yet.</p>
         <ul id="transaction-items"></ul>

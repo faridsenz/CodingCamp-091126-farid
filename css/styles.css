@@ -28,8 +28,29 @@
   --color-border: #d0d3d9;
   --color-error: #b91c1c;
   --color-danger: #dc2626;
+  --color-error-bg: #fef2f2;
   --radius: 8px;
   --spacing: 1rem;
+}
+
+/* ----- Dark mode (optional challenge) ---------------------------------- */
+/* The theme toggle swaps these tokens; every component already reads from
+   the variables above, so no component needs a dark-specific rule. */
+html.dark {
+  --color-bg: #0f1115;
+  --color-surface: #1a1e25;
+  --color-text: #e6e9ef;
+  --color-muted: #9aa3b0;
+  --color-accent: #3b82f6;
+  --color-accent-contrast: #ffffff;
+  --color-border: #333a45;
+  --color-error: #f87171;
+  --color-danger: #f87171;
+  --color-error-bg: #2a1416;
+}
+
+html.dark .storage-error {
+  background-color: var(--color-error-bg);
 }
 
 /* ----- Reset / box model ------------------------------------------------ */
@@ -99,8 +120,30 @@ h2 {
   border-radius: var(--radius);
 }
 
+.balance-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  text-align: left;
+}
+
 #total-balance-label {
+  margin: 0;
   color: var(--color-muted);
+}
+
+/* Theme toggle: still a 44x44px touch target (Req 7.1), but visual weight
+   stays low so it does not compete with the balance. */
+#theme-toggle {
+  width: auto;
+  min-width: var(--touch-target);
+  min-height: var(--touch-target);
+  background-color: transparent;
+  color: var(--color-accent);
+  border: 1px solid var(--color-border);
+  font-size: 1rem;
 }
 
 /* Total_Balance: font size at least 2x the base body text size.
@@ -184,6 +227,27 @@ button:active {
   min-height: 0;
 }
 
+/* ----- List controls: sort + spending limit ---------------------------- */
+.list-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin: 0 0 0.75rem 0;
+}
+
+.control-field {
+  display: flex;
+  flex: 1 1 140px;
+  flex-direction: column;
+  gap: 0.375rem;
+  min-width: 0;             /* prevent overflow at 320px (Req 7.1) */
+}
+
+.control-field label {
+  font-size: 1rem;          /* 16px (Req 8.3) */
+  font-weight: 500;
+}
+
 /* ----- Transaction List (Req 2.2, 7.1, 8.1) ---------------------------- */
 /* The scrollable container scrolls vertically only; horizontal overflow is
    hidden so long item names never cause sideways scroll (Req 2.2, 7.1). */
@@ -223,6 +287,26 @@ button:active {
 #transaction-items li > span {
   min-width: 0;
   word-break: break-word;   /* prevent overflow from long names (Req 7.1) */
+}
+
+/* Item name takes its own line; amount, category, and delete share the next. */
+#transaction-items .tx-name {
+  flex: 1 1 100%;
+  font-weight: 600;
+}
+
+#transaction-items .tx-amount {
+  font-variant-numeric: tabular-nums;
+}
+
+#transaction-items .tx-category {
+  color: var(--color-muted);
+}
+
+/* Highlighted row: spending above the configured limit (optional challenge). */
+#transaction-items li.over-limit {
+  background-color: var(--color-error-bg);
+  border-left: 4px solid var(--color-danger);
 }
 
 /* Delete control is interactive: 44x44px touch target (Req 7.1). */
@@ -283,7 +367,7 @@ button:active {
   padding: 0.75rem var(--spacing);
   margin: var(--spacing) auto 0;
   max-width: var(--content-max-width);
-  background-color: #fef2f2;
+  background-color: var(--color-error-bg);
   border: 1px solid var(--color-error);
   border-radius: var(--radius);
   text-align: center;
