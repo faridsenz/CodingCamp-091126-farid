@@ -348,14 +348,601 @@
   }
 
   /* ===================================================================
+     Persistence Layer — localStorage adapter
+     All operations are wrapped in try/catch because file:// origins are
+     treated inconsistently across Chrome, Firefox, Edge, and Safari
+     (Requirement 5.3). Nothing here ever throws to the caller.
+     =================================================================== */
+
+  // Single storage key. The schema version is embedded in the payload by
+  // serializeTransactions, so the key itself stays stable across versions.
+  var STORAGE_KEY = "expenseViz.transactions";
+
+  /**
+   * Feature-detects Local Storage with a probe write/read/remove cycle.
+   *
+   * @returns {boolean} True when Local Storage is usable.
+   *
+   * Validates: Requirements 5.2, 5.3
+   */
+  function isStorageAvailable() {
+    try {
+      if (typeof localStorage === "undefined" || localStorage === null) {
+        return false;
+      }
+      var probeKey = "__expenseVizProbe__";
+      localStorage.setItem(probeKey, "1");
+      var readBack = localStorage.getItem(probeKey) === "1";
+      localStorage.removeItem(probeKey);
+      return readBack;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  /**
+   * Serializes and writes the transaction list to Local Storage.
+   *
+   * @param {Array<object>} list - Transaction[] to persist.
+   * @returns {boolean} True on success, false on any failure. Never throws.
+   *
+   * Validates: Requirements 5.1, 5.3
+   */
+  function save(list) {
+    try {
+      if (!isStorageAvailable()) {
+        return false;
+      }
+      localStorage.setItem(STORAGE_KEY, serializeTransactions(list));
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  /**
+   * Reads and deserializes the stored transaction list.
+   *
+   * @returns {Array<object>|null} Transaction[] when valid, otherwise null
+   *   (storage unavailable, empty, or invalid data). Never throws.
+   *
+   * Validates: Requirements 5.2, 5.4
+   */
+  function load() {
+    try {
+      if (!isStorageAvailable()) {
+        return null;
+      }
+      var raw = localStorage.getItem(STORAGE_KEY);
+      if (raw === null || raw === "") {
+        return null;
+      }
+      return deserializeTransactions(raw);
+    } catch (e) {
+      return null;
+    }
+  }
+
+  /* ===================================================================
+     State Layer — in-memory transactions array (single source of truth)
+     =================================================================== */
+
+  var transactions = [];
+
+  /**
+   * Generates a unique transaction id.
+   *
+   * Uses crypto.randomUUID when available, falling back to a
+   * timestamp + random string so ids stay unique on older engines.
+   *
+   * @returns {string} Unique id.
+   */
+  function generateId() {
+    try {
+      if (
+        typeof crypto !== "undefined" &&
+        typeof crypto.randomUUID === "function"
+      ) {
+        return crypto.randomUUID();
+      }
+    } catch (e) {
+      // Fall through to the manual generator below.
+    }
+    return (
+      "tx-" +
+      Date.now().toString(36) +
+      "-" +
+      Math.random().toString(36).slice(2, 10)
+    );
+  }
+
+  /**
+   * Converts a raw amount string (major units) to integer cents.
+   *
+   * @param {*} rawAmount - Raw value from the amount field.
+   * @returns {number} Integer cents.
+   */
+  function toCents(rawAmount) {
+    return Math.round(Number(String(rawAmount).trim()) * 100);
+  }
+
+  /**
+   * Adds a transaction from raw form input.
+   *
+   * Validates first; invalid input returns errors and leaves the state
+   * untouched. Valid input appends a Transaction, re-renders every view,
+   * and persists the new list (Requirements 1.2, 5.1).
+   *
+   * @param {object} input - RawInput { itemName, amount, category }.
+   * @returns {{ok: boolean, errors?: object, transaction?: object}}
+   */
+  function addTransaction(input) {
+    var result = validateTransaction(input);
+
+    if (!result.valid) {
+      return { ok: false, errors: result.errors };
+    }
+
+    var transaction = {
+      id: generateId(),
+      itemName: String(input.itemName).trim(),
+      amountCents: toCents(input.amount),
+      category: input.category,
+    };
+
+    transactions.push(transaction);
+    renderAll();
+    persist();
+
+    return { ok: true, transaction: transaction };
+  }
+
+  /**
+   * Removes the transaction with the given id.
+   *
+   * @param {string} id - Transaction id.
+   * @returns {boolean} True when a transaction was removed, false when the
+   *   id was not found (list left unchanged).
+   *
+   * Validates: Requirements 2.4, 5.1
+   */
+  function deleteTransaction(id) {
+    for (var i = 0; i < transactions.length; i++) {
+      if (transactions[i].id === id) {
+        transactions.splice(i, 1);
+        renderAll();
+        persist();
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Returns a copy of the current transaction list (testability helper).
+   *
+   * @returns {Array<object>} Shallow copy of the transactions array.
+   */
+  function getTransactions() {
+    return transactions.slice();
+  }
+
+  /**
+   * Persists the current list and surfaces a non-blocking notice on
+   * failure while keeping the in-memory list intact (Requirement 5.3).
+   *
+   * @returns {boolean} True when the write succeeded.
+   */
+  function persist() {
+    var saved = save(transactions);
+    if (saved) {
+      hideStorageError();
+    } else {
+      showStorageError(
+        "Your transactions could not be saved. They are kept only until this page is closed."
+      );
+    }
+    return saved;
+  }
+
+  /* ===================================================================
+     UI Layer — rendering and event handling
+     =================================================================== */
+
+  // Chart.js instance, created lazily and reused across renders.
+  var chart = null;
+
+  // Per-field error element ids (Requirement 1.3).
+  var FIELD_ERROR_IDS = {
+    itemName: "item-name-error",
+    amount: "amount-error",
+    category: "category-error",
+  };
+
+  /**
+   * Safe element lookup (returns null outside a DOM environment).
+   *
+   * @param {string} id - Element id.
+   * @returns {HTMLElement|null}
+   */
+  function byId(id) {
+    if (typeof document === "undefined" || !document.getElementById) {
+      return null;
+    }
+    return document.getElementById(id);
+  }
+
+  /**
+   * Formats integer cents as a string with exactly 2 decimal places.
+   *
+   * @param {number} cents - Amount in integer cents.
+   * @returns {string} Formatted amount.
+   */
+  function formatCents(cents) {
+    return (cents / 100).toFixed(2);
+  }
+
+  /**
+   * Writes the formatted total balance to the balance element.
+   * Shows 0.00 when no transactions exist (Requirements 3.1, 3.3).
+   */
+  function renderTotalBalance() {
+    var el = byId("total-balance");
+    if (!el) {
+      return;
+    }
+    el.textContent = formatCents(computeTotalBalance(transactions));
+  }
+
+  /**
+   * Builds one list row: item name, amount, category, delete control.
+   *
+   * Uses textContent (never innerHTML) so item names cannot inject markup.
+   *
+   * @param {object} transaction - Transaction to render.
+   * @returns {HTMLLIElement}
+   */
+  function buildTransactionRow(transaction) {
+    var li = document.createElement("li");
+
+    var name = document.createElement("span");
+    name.className = "tx-name";
+    name.textContent = transaction.itemName;
+
+    var amount = document.createElement("span");
+    amount.className = "tx-amount";
+    amount.textContent = formatCents(transaction.amountCents);
+
+    var category = document.createElement("span");
+    category.className = "tx-category";
+    category.textContent = transaction.category;
+
+    var deleteButton = document.createElement("button");
+    deleteButton.type = "button";
+    deleteButton.className = "delete-btn";
+    deleteButton.setAttribute("data-id", transaction.id);
+    deleteButton.setAttribute(
+      "aria-label",
+      "Delete " + transaction.itemName
+    );
+    deleteButton.textContent = "Delete";
+
+    li.appendChild(name);
+    li.appendChild(amount);
+    li.appendChild(category);
+    li.appendChild(deleteButton);
+    return li;
+  }
+
+  /**
+   * Rebuilds the transaction list from the state array.
+   *
+   * Shows the empty-state message when the list is empty and hides it
+   * otherwise (Requirements 2.1, 2.6).
+   */
+  function renderTransactionList() {
+    var listEl = byId("transaction-items");
+    if (!listEl) {
+      return;
+    }
+
+    var emptyEl = byId("empty-state");
+
+    while (listEl.firstChild) {
+      listEl.removeChild(listEl.firstChild);
+    }
+
+    if (transactions.length === 0) {
+      if (emptyEl) {
+        emptyEl.hidden = false;
+      }
+      return;
+    }
+
+    if (emptyEl) {
+      emptyEl.hidden = true;
+    }
+
+    var fragment = document.createDocumentFragment();
+    for (var i = 0; i < transactions.length; i++) {
+      fragment.appendChild(buildTransactionRow(transactions[i]));
+    }
+    listEl.appendChild(fragment);
+  }
+
+  /**
+   * Renders or updates the pie chart of spending per category.
+   *
+   * Shows the "no spending data" message and hides the canvas when there
+   * are no transactions or when Chart.js failed to load, so the app
+   * degrades gracefully (Requirements 4.1, 4.2, 4.3).
+   */
+  function renderChart() {
+    var canvas = byId("spending-chart");
+    var noDataEl = byId("no-spending-data");
+    var chartLibraryLoaded = typeof Chart !== "undefined";
+
+    if (transactions.length === 0 || !canvas || !chartLibraryLoaded) {
+      if (chart) {
+        chart.destroy();
+        chart = null;
+      }
+      if (canvas) {
+        canvas.hidden = true;
+      }
+      if (noDataEl) {
+        noDataEl.hidden = false;
+      }
+      return;
+    }
+
+    if (noDataEl) {
+      noDataEl.hidden = true;
+    }
+    canvas.hidden = false;
+
+    var totals = computeCategoryTotals(transactions);
+    // Chart.js works in major units, so cents are converted for display.
+    var data = [totals.Food / 100, totals.Transport / 100, totals.Fun / 100];
+
+    if (chart) {
+      chart.data.datasets[0].data = data;
+      chart.update();
+      return;
+    }
+
+    chart = new Chart(canvas.getContext("2d"), {
+      type: "pie",
+      data: {
+        labels: ALLOWED_CATEGORIES.slice(),
+        datasets: [
+          {
+            data: data,
+            backgroundColor: ["#2563eb", "#16a34a", "#f59e0b"],
+            borderColor: "#ffffff",
+            borderWidth: 2,
+          },
+        ],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: true,
+        plugins: {
+          legend: {
+            position: "bottom",
+            labels: { boxWidth: 14, font: { size: 14 } },
+          },
+        },
+      },
+    });
+  }
+
+  /**
+   * Re-derives every view from the single source of truth.
+   *
+   * @returns {void}
+   */
+  function renderAll() {
+    renderTransactionList();
+    renderTotalBalance();
+    renderChart();
+  }
+
+  /**
+   * Renders per-field validation messages next to their inputs.
+   * A null message clears the field's error (Requirement 1.3).
+   *
+   * @param {object} errors - { itemName, amount, category } messages.
+   */
+  function showValidationErrors(errors) {
+    var fields = ["itemName", "amount", "category"];
+    for (var i = 0; i < fields.length; i++) {
+      var key = fields[i];
+      var el = byId(FIELD_ERROR_IDS[key]);
+      if (!el) {
+        continue;
+      }
+      el.textContent = errors && errors[key] ? errors[key] : "";
+    }
+  }
+
+  /**
+   * Shows a non-blocking notice that persistence failed (Req 5.3).
+   *
+   * @param {string} message - Message to display.
+   */
+  function showStorageError(message) {
+    var el = byId("storage-error");
+    if (!el) {
+      return;
+    }
+    el.textContent = message;
+    el.hidden = false;
+  }
+
+  /** Hides the storage notice after a successful write. */
+  function hideStorageError() {
+    var el = byId("storage-error");
+    if (!el) {
+      return;
+    }
+    el.hidden = true;
+    el.textContent = "";
+  }
+
+  /**
+   * Form submit handler.
+   *
+   * Clears the form on success; on failure shows inline messages and keeps
+   * the entered values (Requirements 1.2, 1.3).
+   *
+   * @param {Event} event - Submit event.
+   * @returns {object} The addTransaction result.
+   */
+  function handleFormSubmit(event) {
+    if (event && typeof event.preventDefault === "function") {
+      event.preventDefault();
+    }
+
+    var nameEl = byId("item-name");
+    var amountEl = byId("amount");
+    var categoryEl = byId("category");
+
+    var result = addTransaction({
+      itemName: nameEl ? nameEl.value : "",
+      amount: amountEl ? amountEl.value : "",
+      category: categoryEl ? categoryEl.value : "",
+    });
+
+    if (result.ok) {
+      showValidationErrors(null);
+      var form = byId("expense-form");
+      if (form && typeof form.reset === "function") {
+        form.reset();
+      } else {
+        if (nameEl) {
+          nameEl.value = "";
+        }
+        if (amountEl) {
+          amountEl.value = "";
+        }
+        if (categoryEl) {
+          categoryEl.value = "";
+        }
+      }
+      if (nameEl && typeof nameEl.focus === "function") {
+        nameEl.focus();
+      }
+    } else {
+      showValidationErrors(result.errors);
+    }
+
+    return result;
+  }
+
+  /**
+   * Delete handler: asks for confirmation, then removes the transaction.
+   * Cancelling leaves the list untouched (Requirements 2.3, 2.4, 2.5).
+   *
+   * @param {string} id - Transaction id.
+   * @returns {boolean} True when the transaction was removed.
+   */
+  function handleDeleteClick(id) {
+    if (!id) {
+      return false;
+    }
+
+    var confirmed =
+      typeof window !== "undefined" && typeof window.confirm === "function"
+        ? window.confirm("Delete this transaction?")
+        : true;
+
+    if (!confirmed) {
+      return false;
+    }
+
+    return deleteTransaction(id);
+  }
+
+  /**
+   * Restores state from Local Storage, wires the event listeners, and
+   * renders the initial views (Requirements 5.2, 5.4, 6.1).
+   *
+   * @returns {object} The public ExpenseViz API.
+   */
+  function init() {
+    var restored = load();
+    transactions = restored === null ? [] : restored;
+
+    renderAll();
+
+    var form = byId("expense-form");
+    if (form && typeof form.addEventListener === "function") {
+      form.addEventListener("submit", handleFormSubmit);
+    }
+
+    var listEl = byId("transaction-items");
+    if (listEl && typeof listEl.addEventListener === "function") {
+      // Event delegation: one listener covers every current and future row.
+      listEl.addEventListener("click", function (event) {
+        var target = event.target;
+        while (
+          target &&
+          target !== listEl &&
+          !(target.classList && target.classList.contains("delete-btn"))
+        ) {
+          target = target.parentNode;
+        }
+        if (
+          target &&
+          target !== listEl &&
+          target.classList &&
+          target.classList.contains("delete-btn")
+        ) {
+          handleDeleteClick(target.getAttribute("data-id"));
+        }
+      });
+    }
+
+    if (!isStorageAvailable()) {
+      showStorageError(
+        "Local storage is unavailable in this browser. Transactions will be kept only until this page is closed."
+      );
+    }
+
+    return publicApi;
+  }
+
+  /* ===================================================================
      Public API (exposed for testing and external use)
      =================================================================== */
 
-  globalThis.ExpenseViz = {
+  var publicApi = {
     validateTransaction: validateTransaction,
     computeTotalBalance: computeTotalBalance,
     computeCategoryTotals: computeCategoryTotals,
     serializeTransactions: serializeTransactions,
     deserializeTransactions: deserializeTransactions,
+    addTransaction: addTransaction,
+    deleteTransaction: deleteTransaction,
+    getTransactions: getTransactions,
+    renderAll: renderAll,
+    handleFormSubmit: handleFormSubmit,
+    handleDeleteClick: handleDeleteClick,
+    init: init,
   };
+
+  globalThis.ExpenseViz = publicApi;
+
+  // Auto-initialize only in a real browser. The guard keeps the module
+  // importable from a Node test environment (no `document` there).
+  if (typeof document !== "undefined") {
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", function () {
+        init();
+      });
+    } else {
+      init();
+    }
+  }
 })();
