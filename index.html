@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Expense &amp; Budget Visualizer</title>
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+  <main>
+    <!-- 1. Total Balance -->
+    <section id="total-balance-section" aria-labelledby="total-balance-label">
+      <h1 id="total-balance-label">Total Balance</h1>
+      <p id="total-balance">0.00</p>
+    </section>
+
+    <!-- 2. Input Form -->
+    <section id="input-form-section" aria-labelledby="input-form-label">
+      <h2 id="input-form-label">Add Expense</h2>
+      <form id="expense-form" novalidate>
+        <div class="form-field">
+          <label for="item-name">Item Name</label>
+          <input type="text" id="item-name" name="item-name" maxlength="100" autocomplete="off">
+          <span id="item-name-error" class="error-message" role="alert"></span>
+        </div>
+        <div class="form-field">
+          <label for="amount">Amount</label>
+          <input type="number" id="amount" name="amount" step="0.01" min="0.01" max="999999999.99" autocomplete="off">
+          <span id="amount-error" class="error-message" role="alert"></span>
+        </div>
+        <div class="form-field">
+          <label for="category">Category</label>
+          <select id="category" name="category">
+            <option value="">Select a category</option>
+            <option value="Food">Food</option>
+            <option value="Transport">Transport</option>
+            <option value="Fun">Fun</option>
+          </select>
+          <span id="category-error" class="error-message" role="alert"></span>
+        </div>
+        <button type="submit">Add Transaction</button>
+      </form>
+    </section>
+
+    <!-- 3. Transaction List -->
+    <section id="transaction-list-section" aria-labelledby="transaction-list-label">
+      <h2 id="transaction-list-label">Transaction List</h2>
+      <div id="transaction-list" class="scrollable-container">
+        <p id="empty-state" class="empty-state">No transactions have been recorded yet.</p>
+        <ul id="transaction-items"></ul>
+      </div>
+    </section>
+
+    <!-- 4. Spending Chart -->
+    <section id="spending-chart-section" aria-labelledby="spending-chart-label">
+      <h2 id="spending-chart-label">Spending by Category</h2>
+      <div id="chart-container">
+        <canvas id="spending-chart"></canvas>
+        <p id="no-spending-data" class="no-data-message">No spending data available.</p>
+      </div>
+    </section>
+  </main>
+
+  <!-- Non-blocking persistence error notice (hidden until an error occurs) -->
+  <div id="storage-error" class="storage-error" role="alert" hidden></div>
+
+  <!-- Chart.js via CDN (traditional script tag, not ES module) -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <!-- Application logic (IIFE module pattern) -->
+  <script src="js/app.js"></script>
+</body>
+</html>

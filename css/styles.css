@@ -1,0 +1,294 @@
+/* =========================================================================
+   Expense & Budget Visualizer — styles.css
+   Responsive, mobile-friendly styling.
+
+   Requirements covered:
+   - 7.1: No horizontal scrolling (320–768px), 16px min font, 44x44px touch targets
+   - 8.1: Single vertical stack, no extra sections or decorative elements
+   - 8.2: Total_Balance font size >= 2x base body text size
+   - 8.3: Base body text size >= 16px for all displayed text
+   - 2.2: Transaction_List container scrolls vertically only
+   ========================================================================= */
+
+/* ----- Design tokens ---------------------------------------------------- */
+:root {
+  /* Base body text size: at least 16px (Req 8.3, 7.1). All rem units derive
+     from this, so every element that uses rem is guaranteed >= 16px. */
+  --base-font-size: 16px;
+  --balance-font-size: 2.5rem;      /* 40px — >= 2x base (32px) (Req 8.2) */
+  --touch-target: 44px;             /* min width/height for interactive el (Req 7.1) */
+  --content-max-width: 480px;
+  --scroll-container-height: 50vh;
+  --color-bg: #ffffff;
+  --color-surface: #f7f7f8;
+  --color-text: #1a1a1a;
+  --color-muted: #555555;
+  --color-accent: #2563eb;
+  --color-accent-contrast: #ffffff;
+  --color-border: #d0d3d9;
+  --color-error: #b91c1c;
+  --color-danger: #dc2626;
+  --radius: 8px;
+  --spacing: 1rem;
+}
+
+/* ----- Reset / box model ------------------------------------------------ */
+*,
+*::before,
+*::after {
+  box-sizing: border-box; /* Req 7.1: prevents padding/border causing overflow */
+}
+
+html {
+  /* Pin the root font size so 1rem == 16px exactly (Req 8.3, 7.1). */
+  font-size: var(--base-font-size);
+  /* Prevent horizontal scrolling across all widths, including 320–768px (Req 7.1). */
+  overflow-x: hidden;
+}
+
+body {
+  margin: 0;
+  padding: var(--spacing);
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial,
+    sans-serif;
+  font-size: 1rem;          /* 16px — base body text size (Req 8.3) */
+  line-height: 1.5;
+  color: var(--color-text);
+  background-color: var(--color-bg);
+  /* No horizontal scrollbar at any width (Req 7.1). */
+  overflow-x: hidden;
+  width: 100%;
+  max-width: 100%;
+}
+
+/* ----- Single vertical stack layout (Req 8.1) --------------------------- */
+/* main holds exactly four sections in order: Total_Balance, Input_Form,
+   Transaction_List, Spending_Chart. No decorative wrappers, sidebars, or
+   extra columns. */
+main {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--spacing) * 1.5);
+  width: 100%;
+  max-width: var(--content-max-width);
+  margin: 0 auto;
+}
+
+section {
+  width: 100%;
+}
+
+/* Headings: all displayed text must be >= 16px (Req 8.3). */
+h1 {
+  margin: 0 0 0.25rem 0;
+  font-size: 1.125rem;       /* 18px >= 16px */
+  font-weight: 600;
+}
+
+h2 {
+  margin: 0 0 0.5rem 0;
+  font-size: 1.0625rem;     /* 17px >= 16px */
+  font-weight: 600;
+}
+
+/* ----- Total Balance (Req 8.2, 8.1) ------------------------------------ */
+#total-balance-section {
+  text-align: center;
+  padding: var(--spacing);
+  background-color: var(--color-surface);
+  border-radius: var(--radius);
+}
+
+#total-balance-label {
+  color: var(--color-muted);
+}
+
+/* Total_Balance: font size at least 2x the base body text size.
+   Base is 16px, so 2x = 32px; 2.5rem = 40px comfortably satisfies this. */
+#total-balance {
+  margin: 0;
+  font-size: var(--balance-font-size); /* 2.5rem = 40px (Req 8.2) */
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+/* ----- Input Form ------------------------------------------------------- */
+#expense-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing);
+}
+
+.form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+/* Labels are displayed text: keep >= 16px (Req 8.3). */
+label {
+  font-size: 1rem;          /* 16px */
+  font-weight: 500;
+}
+
+/* Interactive elements: minimum touch target 44x44px (Req 7.1).
+   Inputs, select, and button all full-width on mobile for usability. */
+input,
+select,
+button {
+  font-family: inherit;
+  font-size: 1rem;          /* 16px — displayed text inside controls (Req 8.3) */
+  min-height: var(--touch-target); /* 44px (Req 7.1) */
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background-color: var(--color-bg);
+  color: var(--color-text);
+}
+
+select {
+  appearance: none;
+  -webkit-appearance: none;
+  cursor: pointer;
+}
+
+button {
+  min-width: var(--touch-target);  /* 44px — square-touchable (Req 7.1) */
+  padding: 0.625rem 1rem;
+  border: none;
+  border-radius: var(--radius);
+  background-color: var(--color-accent);
+  color: var(--color-accent-contrast);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+button:hover {
+  filter: brightness(0.95);
+}
+
+button:active {
+  filter: brightness(0.9);
+}
+
+/* Inline validation messages (displayed text >= 16px, Req 8.3). */
+.error-message {
+  display: block;
+  min-height: 1.25rem;
+  font-size: 1rem;          /* 16px */
+  color: var(--color-error);
+}
+
+.error-message:empty {
+  min-height: 0;
+}
+
+/* ----- Transaction List (Req 2.2, 7.1, 8.1) ---------------------------- */
+/* The scrollable container scrolls vertically only; horizontal overflow is
+   hidden so long item names never cause sideways scroll (Req 2.2, 7.1). */
+.scrollable-container,
+#transaction-list {
+  overflow-y: auto;
+  overflow-x: hidden;
+  max-height: var(--scroll-container-height);
+  padding: 0.5rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background-color: var(--color-bg);
+}
+
+#transaction-items {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+/* Each transaction row: full width, never wider than the container (Req 7.1). */
+#transaction-items li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--color-border);
+  min-width: 0;             /* allow flex children to shrink (Req 7.1) */
+  width: 100%;
+}
+
+#transaction-items li > span {
+  min-width: 0;
+  word-break: break-word;   /* prevent overflow from long names (Req 7.1) */
+}
+
+/* Delete control is interactive: 44x44px touch target (Req 7.1). */
+#transaction-items .delete-btn {
+  min-height: var(--touch-target);
+  min-width: var(--touch-target);
+  width: auto;
+  flex: 0 0 auto;
+  padding: 0.375rem 0.75rem;
+  background-color: transparent;
+  color: var(--color-danger);
+  border: 1px solid var(--color-danger);
+}
+
+#transaction-items .delete-btn:hover {
+  background-color: var(--color-danger);
+  color: var(--color-accent-contrast);
+}
+
+/* Empty-state message (displayed text >= 16px, Req 8.3, 2.6). */
+.empty-state {
+  margin: 0;
+  padding: var(--spacing);
+  text-align: center;
+  font-size: 1rem;          /* 16px */
+  color: var(--color-muted);
+}
+
+/* ----- Spending Chart -------------------------------------------------- */
+#chart-container {
+  position: relative;
+  width: 100%;
+  max-width: 100%;
+}
+
+/* Canvas must never exceed its container width (Req 7.1). */
+#spending-chart {
+  max-width: 100%;
+  width: 100%;
+  height: auto;
+}
+
+/* "No spending data" message (displayed text >= 16px, Req 8.3, 4.3). */
+.no-data-message {
+  margin: 0;
+  padding: var(--spacing);
+  text-align: center;
+  font-size: 1rem;          /* 16px */
+  color: var(--color-muted);
+}
+
+/* ----- Storage error notice (Req 5.3) ---------------------------------- */
+/* Hidden by default via the [hidden] attribute in HTML; styled here so that
+   when shown it is non-blocking and readable. */
+.storage-error {
+  font-size: 1rem;          /* 16px (Req 8.3) */
+  color: var(--color-error);
+  padding: 0.75rem var(--spacing);
+  margin: var(--spacing) auto 0;
+  max-width: var(--content-max-width);
+  background-color: #fef2f2;
+  border: 1px solid var(--color-error);
+  border-radius: var(--radius);
+  text-align: center;
+}
+
+.storage-error[hidden] {
+  display: none;
+}

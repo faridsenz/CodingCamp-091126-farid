@@ -1,0 +1,1 @@
+{"name": "expense-budget-visualizer", "version": "1.0.0", "private": true, "type": "module", "scripts": {"test": "vitest run"}, "devDependencies": {"fast-check": "^3.19.0", "vitest": "^1.6.0"}}
